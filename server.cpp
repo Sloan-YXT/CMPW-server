@@ -429,19 +429,30 @@ void *Adata(void *arg)
                         auto c = nodesA.find(a_info->name);
                         if (c != nodesA.end())
                         {
-                            for (auto b = c->second->connection.begin(); b != c->second->connection.end(); c++)
+                            for (auto b = c->second->connection.begin(); b != c->second->connection.end(); b++)
                             {
+                                DEBUG("in Adata sending");
                                 json j;
                                 j["type"] = "cmd";
                                 j["content"] = "breset";
                                 string a = j.dump();
-                                int m = send((*b)->fd_data, a.c_str(), a.size(), 0);
+                                int len = a.size();
+                                len = htonl(len);
+                                int m = send((*b)->fd_data, &len, sizeof(len), 0);
                                 if (m <= 0 && errno != EPIPE)
                                 {
                                     printf("send breset failed in %d:%s\n", __LINE__, strerror(errno));
                                     exit_database();
                                     exit(1);
                                 }
+                                m = send((*b)->fd_data, a.c_str(), a.size(), 0);
+                                if (m <= 0 && errno != EPIPE)
+                                {
+                                    printf("send breset failed in %d:%s\n", __LINE__, strerror(errno));
+                                    exit_database();
+                                    exit(1);
+                                }
+                                DEBUG(a.c_str());
                             }
                             DEBUG("");
                         }
@@ -492,13 +503,22 @@ void *Adata(void *arg)
                         auto c = nodesA.find(a_info->name);
                         if (c != nodesA.end())
                         {
-                            for (auto b = c->second->connection.begin(); b != c->second->connection.end(); c++)
+                            for (auto b = c->second->connection.begin(); b != c->second->connection.end(); b++)
                             {
                                 json j;
                                 j["type"] = "cmd";
                                 j["content"] = "breset";
                                 string a = j.dump();
-                                int m = send((*b)->fd_data, a.c_str(), a.size(), 0);
+                                int len = a.size();
+                                len = htonl(len);
+                                int m = send((*b)->fd_data, &len, sizeof(len), 0);
+                                if (m <= 0 && errno != EPIPE)
+                                {
+                                    printf("send breset failed in %d:%s\n", __LINE__, strerror(errno));
+                                    exit_database();
+                                    exit(1);
+                                }
+                                m = send((*b)->fd_data, a.c_str(), a.size(), 0);
                                 if (m <= 0 && errno != EPIPE)
                                 {
                                     printf("send breset failed in %d:%s\n", __LINE__, strerror(errno));
@@ -571,6 +591,7 @@ void *Adata(void *arg)
                             DEBUG("");
                             reply["position"] = data["position"];
                             string reply_string = reply.dump();
+                            DEBUG("before send data to B");
                             for (auto m = p->second->connection.begin(); m != p->second->connection.end(); m++)
                             {
                                 int fd_tmp = (*m)->fd_data;
@@ -600,6 +621,7 @@ void *Adata(void *arg)
                                     exit_database();
                                     exit(1);
                                 }
+                                DEBUG(reply_string.c_str());
                             }
                         }
                         nodesA.unlock();
@@ -620,13 +642,22 @@ void *Adata(void *arg)
                             auto c = nodesA.find(name);
                             if (c != nodesA.end())
                             {
-                                for (auto b = c->second->connection.begin(); b != c->second->connection.end(); c++)
+                                for (auto b = c->second->connection.begin(); b != c->second->connection.end(); b++)
                                 {
                                     json j;
                                     j["type"] = "cmd";
                                     j["content"] = "breset";
                                     string a = j.dump();
-                                    int m = send((*b)->fd_data, a.c_str(), a.size(), 0);
+                                    int len = a.size();
+                                    len = htonl(len);
+                                    int m = send((*b)->fd_data, &len, sizeof(len), 0);
+                                    if (m <= 0 && errno != EPIPE)
+                                    {
+                                        printf("send breset failed in %d:%s\n", __LINE__, strerror(errno));
+                                        exit_database();
+                                        exit(1);
+                                    }
+                                    m = send((*b)->fd_data, a.c_str(), a.size(), 0);
                                     if (m <= 0 && errno != EPIPE)
                                     {
                                         printf("send breset failed in %d:%s\n", __LINE__, strerror(errno));
@@ -1045,20 +1076,22 @@ void *Bconnect(void *arg)
                         }
                         else
                         {
+                            DEBUG("before B json parse");
                             json j = json::parse(request);
                             string type = j["type"];
                             if (type == "connect")
                             {
                                 string boardName = j["board name"];
-                                string clientName = j["cleint name"];
+                                string clientName = j["client name"];
                                 info->board_name = boardName;
                                 info->client_name = clientName;
                                 nodesA.lock();
                                 auto c = nodesA.find(boardName);
-
-                                c->second->connection.push_back(info);
-                                c->second->gdata_node->connection.push_back(info);
-
+                                if (c != nodesA.end())
+                                {
+                                    c->second->connection.push_back(info);
+                                    c->second->gdata_node->connection.push_back(info);
+                                }
                                 nodesA.unlock();
                                 int vcode = c->second->vcode;
                                 vcode = htonl(vcode);
@@ -1192,7 +1225,8 @@ AThread(void *arg)
         if (connfdData < 0)
         {
             perror("error accepting from board(data)");
-            exit(1);
+            continue;
+            //exit(1);
         }
         DEBUG("");
         n = recv(connfdData, &len_tmp, sizeof(len_tmp), MSG_WAITALL);
@@ -1518,7 +1552,8 @@ void *BThread(void *arg)
         if (connfdOther < 0)
         {
             perror("error accepting from android:");
-            exit(1);
+            continue;
+            //exit(1);
         }
         info = new BNodeInfo;
         ev.events = EPOLLIN | EPOLLET | EPOLLERR;
@@ -1544,7 +1579,7 @@ void *BThread(void *arg)
         }
         nodesA.unlock();
         Bdata["nodes"] = j;
-        string data_string = j.dump();
+        string data_string = Bdata.dump();
         int len = data_string.length();
         len = htonl(len);
         int n = send(connfdOther, &len, sizeof(len), 0);

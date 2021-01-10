@@ -103,10 +103,12 @@ public:
     }
     void lock(void)
     {
+        cout << "stackV lock" << endl;
         pthread_mutex_lock(&dlock);
     }
     void unlock(void)
     {
+        cout << "stackV unlock" << endl;
         pthread_mutex_unlock(&dlock);
     }
     auto empty(void)
@@ -220,10 +222,12 @@ public:
     }
     void lock(void)
     {
+        cout << "nodesA locked" << endl;
         pthread_mutex_lock(&dlock);
     }
     void unlock(void)
     {
+        cout << "nodesA unlocked" << endl;
         pthread_mutex_unlock(&dlock);
     }
 };
@@ -341,7 +345,7 @@ int listenAdata, listenAgraph, listenAtick, listenBdata, listenBgraph, listenBot
 #define memset ::memset
 void clean_sock(void)
 {
-    perror("clean check error:");
+    perror("clean check error");
     close(listenAdata);
     close(listenAgraph);
     close(listenAtick);
@@ -598,8 +602,11 @@ void *Adata(void *arg)
                                 int len_tmp = reply_string.size();
                                 len_tmp = htonl(len_tmp);
                                 n = send(fd_tmp, &len_tmp, sizeof(len_tmp), 0);
-                                if (n < 0 && errno == EPIPE)
+                                DEBUG("n=");
+                                printf("%d\n", n);
+                                if (n < 0 && (errno == EPIPE | errno == ECONNRESET))
                                 {
+                                    DEBUG("EPIPE");
                                     // close((*m)->fd_data);
                                     // p->second->connection.remove(*m);
                                 }
@@ -610,8 +617,9 @@ void *Adata(void *arg)
                                     exit(1);
                                 }
                                 n = send(fd_tmp, reply_string.c_str(), reply_string.size(), 0);
-                                if (n < 0 && errno == EPIPE)
+                                if (n < 0 && (errno == EPIPE | errno == ECONNRESET))
                                 {
+                                    DEBUG("EPIPE");
                                     // close((*m)->fd_data);
                                     // p->second->connection.remove(*m);
                                 }
@@ -789,6 +797,7 @@ void *Agraph(void *arg)
                     ERROR_ACTION(n)
                     if (n == 0)
                     {
+                        DEBUG("");
                         if (epoll_ctl(epfd, EPOLL_CTL_DEL, connfd, NULL) == -1)
                         {
                             printf("A read epoll del failed %d:%s", __LINE__, strerror(errno));
@@ -803,12 +812,14 @@ void *Agraph(void *arg)
                     else
                     {
                         nodesA.lock();
+                        DEBUG("");
                         for (auto m = info->connection.begin(); m != info->connection.end(); m++)
                         {
                             int rlen = htonl(len);
                             n = send((*m)->fd_graph, &rlen, sizeof(rlen), 0);
-                            if (n < 0 && errno == EPIPE)
+                            if (n < 0 && (errno == EPIPE | errno == ECONNRESET))
                             {
+                                DEBUG("EPIPE");
                                 // close((*m)->fd_graph);
                                 // info->connection.remove(*m);
                             }
@@ -818,9 +829,11 @@ void *Agraph(void *arg)
                                 exit_database();
                                 exit(1);
                             }
+                            printf("debug:graph len=%d\n", len);
                             n = send((*m)->fd_graph, graph_buffer, len, 0);
-                            if (n < 0 && errno == EPIPE)
+                            if (n < 0 && (errno == EPIPE | errno == ECONNRESET))
                             {
+                                DEBUG("EPIPE");
                                 // close((*m)->fd_graph);
                                 // info->connection.remove(*m);
                             }
@@ -830,6 +843,8 @@ void *Agraph(void *arg)
                                 exit_database();
                                 exit(1);
                             }
+                            DEBUG("send graph to client:");
+                            DEBUG((*m)->client_name.c_str());
                         }
                         nodesA.unlock();
                     }
@@ -962,7 +977,8 @@ void *TickTock(void *arg)
         }
         DEBUG("Tick thread still in working");
         nodesATick->unlock();
-        sleep(10);
+        sleep(5);
+        //TO DO：改进时效差,板子发送间隔改为5s
         //for(int i=90000000;i>=0;i--);
     }
 }
@@ -1012,10 +1028,6 @@ void *Bconnect(void *arg)
                         printf("%s:socket error:connection with board%s [%s:%d]:%s\n", asctime(localtime(&now)), info->client_name.c_str(), inet_ntop(AF_INET, &info->clientData.sin_addr, p, 20), ntohs(info->clientData.sin_port), strerror(errno));
                         free(p);
                         ERROR_ACTION(epoll_ctl(epfd, EPOLL_CTL_DEL, fd, &ev));
-                        close(fd);
-                        close(info->fd_graph);
-                        close(info->fd_data);
-
                         if (info->board_name != BBBEFORE)
                         {
                             nodesA.lock();
@@ -1027,6 +1039,10 @@ void *Bconnect(void *arg)
                             }
                             nodesA.unlock();
                         }
+                        //顺序不能反：运气好见到了反了的话，在刚关闭socket还未删节点时出问题：bad file descriptor
+                        close(fd);
+                        close(info->fd_graph);
+                        close(info->fd_data);
                         delete info;
                         numer.decreaseB();
                         continue;
@@ -1096,7 +1112,7 @@ void *Bconnect(void *arg)
                                 int vcode = c->second->vcode;
                                 vcode = htonl(vcode);
                                 n = send(fd, &vcode, sizeof(vcode), 0);
-                                if (n < 0 && errno == EPIPE)
+                                if (n < 0 && (errno == EPIPE | errno == ECONNRESET))
                                 {
                                 }
                                 else if (n <= 0)
@@ -1229,24 +1245,54 @@ AThread(void *arg)
             //exit(1);
         }
         DEBUG("");
-        n = recv(connfdData, &len_tmp, sizeof(len_tmp), MSG_WAITALL);
-        DEBUG("");
+        fd_set accept_tout;
+        int maxfd, n;
+        timeval tout = {1, 0};
+        FD_ZERO(&accept_tout);
+        FD_SET(connfdData, &accept_tout);
+        maxfd = connfdData + 1;
+        n = select(maxfd, &accept_tout, NULL, NULL, &tout);
         ERROR_ACTION(n)
         if (n == 0)
         {
             close(connfdData);
             continue;
         }
-        len_tmp = ntohl(len_tmp);
-        n = recv(connfdData, message_buffer, len_tmp, MSG_WAITALL);
-        if (n < 0 && errno != ECONNRESET)
+        else
         {
-            exit(1);
+            n = recv(connfdData, &len_tmp, sizeof(len_tmp), MSG_WAITALL);
+
+            DEBUG("");
+            ERROR_ACTION(n)
+            if (n == 0)
+            {
+                close(connfdData);
+                continue;
+            }
         }
-        if (n == 0 | errno == ECONNRESET)
+        len_tmp = ntohl(len_tmp);
+        FD_ZERO(&accept_tout);
+        FD_SET(connfdData, &accept_tout);
+        maxfd = connfdData + 1;
+        n = select(maxfd, &accept_tout, NULL, NULL, &tout);
+        ERROR_ACTION(n)
+        if (n == 0)
         {
             close(connfdData);
             continue;
+        }
+        else
+        {
+            n = recv(connfdData, message_buffer, len_tmp, MSG_WAITALL);
+            if (n < 0 && errno != ECONNRESET)
+            {
+                exit(1);
+            }
+            if (n == 0 | errno == ECONNRESET)
+            {
+                close(connfdData);
+                continue;
+            }
         }
         message_buffer[n] = 0;
         nodesA.lock();
@@ -1286,7 +1332,7 @@ AThread(void *arg)
         DEBUG("");
         if (n <= 0)
         {
-            if (errno == EPIPE)
+            if ((errno == EPIPE | errno == ECONNRESET))
             {
                 close(connfdData);
                 continue;
@@ -1302,7 +1348,7 @@ AThread(void *arg)
         n = send(connfdData, &len_tmp, sizeof(len_tmp), 0);
         if (n <= 0)
         {
-            if (errno == EPIPE)
+            if ((errno == EPIPE | errno == ECONNRESET))
             {
                 close(connfdData);
                 continue;
@@ -1316,7 +1362,7 @@ AThread(void *arg)
         n = send(connfdData, reply, strlen(reply), 0);
         if (n <= 0)
         {
-            if (errno == EPIPE)
+            if ((errno == EPIPE | errno == ECONNRESET))
             {
                 close(connfdData);
                 continue;
@@ -1334,9 +1380,7 @@ AThread(void *arg)
             continue;
         }
         //TO DO 这样的逻辑可能导致卡死，需要设置超时
-        fd_set accept_tout;
-        int maxfd, n;
-        timeval tout = {1, 0};
+
         FD_ZERO(&accept_tout);
         FD_SET(listenAgraph, &accept_tout);
         maxfd = listenAgraph + 1;

@@ -1122,6 +1122,30 @@ void *Bconnect(void *arg)
                                     exit(1);
                                 }
                             }
+                            else if (type == "month data")
+                            {
+                                string name = j["board name"];
+                                time_t time_now = time(NULL);
+                                struct tm *now = localtime(&time_now);
+                                string month_data = get_month_data(now->tm_mon + 1, name);
+                                n = send(fd, month_data.c_str(), month_data.size(), 0);
+                                if (n < 0 && (errno == EPIPE | errno == ECONNRESET))
+                                {
+                                }
+                                else if (n <= 0)
+                                {
+                                    printf("send failed in %d:%s\n", __LINE__, strerror(errno));
+                                    exit_database();
+                                    exit(1);
+                                }
+                            }
+                            else if (type == "delete month data")
+                            {
+                                string name = j["board name"];
+                                time_t time_now = time(NULL);
+                                struct tm *now = localtime(&time_now);
+                                delete_data(now->tm_mon + 1, name);
+                            }
                         }
                     }
                 }

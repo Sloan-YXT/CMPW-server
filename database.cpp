@@ -7,6 +7,7 @@
 #include "data.h"
 #include <string>
 #include <iostream>
+#include <stack>
 #define ATIMES 1
 using namespace std;
 using namespace nlohmann;
@@ -68,7 +69,7 @@ void database_init()
         printf("mysql connection init failed:%d", mysql_error(&mydata_A));
         exit(1);
     }
-    if (NULL == mysql_real_connect(&mydata_A,"localhost", "root", "Yy649535675!", database, 3306, NULL, CLIENT_MULTI_STATEMENTS))
+    if (NULL == mysql_real_connect(&mydata_A, "localhost", "root", "Yy649535675!", database, 3306, NULL, CLIENT_MULTI_STATEMENTS))
     {
         printf("connect failed!\n");
         perror("");
@@ -114,6 +115,68 @@ void save_board_data(string json_data)
         printf("MySQL query error : %s/n", mysql_error(&mydata_A));
         exit(1);
     };
+}
+string get_month_data(int month_int, string name)
+{
+    string type = "month data";
+    json j;
+    j["type"] = type;
+    string month = to_string(month_int);
+    string thisQuery = "select * from board_data where month = " + month + " and board_name = \"" + name.c_str() + "\"";
+    MYSQL_RES *result = NULL;
+    if (0 == mysql_query(&mydata_A, thisQuery.c_str()))
+    {
+        cout << "mysql_query() select data succeed" << endl;
+        result = mysql_store_result(&mydata_A);
+        int rowcount = mysql_num_rows(result);
+        int fieldcount = mysql_num_fields(result);
+        j["num"] = rowcount;
+        json data;
+
+        MYSQL_FIELD *field = NULL;
+        MYSQL_ROW row = NULL;
+        row = mysql_fetch_row(result);
+        int i = 0;
+        while (NULL != row)
+        {
+            json k;
+            k["id"] = row[0];
+            k["year"] = row[1];
+            k["month"] = row[2];
+            k["date"] = row[3];
+            k["weekday"] = row[4];
+            k["time"] = row[5];
+            k["name"] = row[6];
+            k["location"] = row[7];
+            k["temp"] = row[8];
+            k["humi"] = row[9];
+            row = mysql_fetch_row(result);
+            data[i++] = k;
+        }
+        j["data"] = data;
+        mysql_free_result(result);
+        return j.dump();
+    }
+    else
+    {
+        perror("query month data failed");
+        printf("MySQL query error : %s/n", mysql_error(&mydata_A));
+        exit(1);
+    }
+}
+void delete_data(int monthData, string name)
+{
+    string tmp = to_string(monthData);
+    string sql = (string) "delete from board_data where month = " + tmp + " and board_name = \"" + name.c_str() + "\"";
+    if (0 == mysql_query(&mydata_A, sql.c_str()))
+    {
+        return;
+    }
+    else
+    {
+        perror("month data delete failed");
+        exit(1);
+    }
 }
 void exit_database()
 {
